@@ -1,0 +1,45 @@
+name: Scrape and Process (Browser)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with: { python-version: '3.11' }
+
+      - name: Install dependencies
+        run: |
+          pip install requests pandas openpyxl playwright
+          playwright install chromium
+          playwright install-deps
+
+      - name: Scrape FusionSolar portal
+        env:
+          FUSIONSOLAR_USERNAME: ${{ secrets.FUSIONSOLAR_USERNAME }}
+          FUSIONSOLAR_PASSWORD: ${{ secrets.FUSIONSOLAR_PASSWORD }}
+        run: python scrape.py
+
+      - name: Process data
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python process.py
+
+      - name: Commit and push
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add sites/*/data/*.json data/raw/*
+          git diff --quiet && git diff --staged --quiet && exit 0
+          git commit -m "Scrape update - $(date +'%Y-%m-%d %H:%M UTC')"
+          for i in 1 2 3; do
+            git pull --no-rebase -X ours && git push && break
+            sleep 5
+          done
