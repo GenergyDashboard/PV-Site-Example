@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Addo Spar — PV Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1419;color:#e2e8f0;font-family:'Segoe UI',Tahoma,sans-serif;padding:20px;max-width:800px;margin:0 auto}
+h1{font-size:1.4rem;margin-bottom:4px}
+.sub{color:#64748b;font-size:0.7rem;margin-bottom:20px}
+.stat-row{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.stat{background:linear-gradient(135deg,#1a2332,#1e2936);border-radius:10px;padding:14px 18px;flex:1;min-width:120px}
+.stat .label{font-size:0.6rem;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px}
+.stat .value{font-size:1.5rem;font-weight:700;margin-top:4px}
+.stat .unit{font-size:0.7rem;color:#9ca3af;font-weight:400}
+.chart-wrap{background:linear-gradient(135deg,#1a2332,#1e2936);border-radius:10px;padding:16px;margin-bottom:20px}
+.chart-title{font-size:0.8rem;color:#9ca3af;margin-bottom:10px}
+canvas{max-height:300px}
+.status{display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.7rem;font-weight:700}
+.status.ok{background:rgba(34,197,94,0.2);color:#22c55e}
+.status.low{background:rgba(251,146,60,0.2);color:#fb923c}
+.status.offline{background:rgba(107,114,128,0.2);color:#6b7280}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:0.6rem;color:#9ca3af;margin-top:8px}
+.legend span{display:flex;align-items:center;gap:4px}
+.legend i{width:14px;height:3px;border-radius:1px;display:inline-block}
+.footer{text-align:center;font-size:0.6rem;color:#4b5563;margin-top:30px}
+</style>
+</head>
+<body>
+
+<h1>☀️ Addo Spar — PV Dashboard</h1>
+<div class="sub" id="updated">Loading...</div>
+
+<div class="stat-row">
+    <div class="stat">
+        <div class="label">Generation Today</div>
+        <div class="value" id="totalKwh">--<span class="unit"> kWh</span></div>
+    </div>
+    <div class="stat">
+        <div class="label">Status</div>
+        <div class="value"><span class="status" id="status">--</span></div>
+    </div>
+    <div class="stat">
+        <div class="label">30-Day Average</div>
+        <div class="value" id="avgKwh">--<span class="unit"> kWh</span></div>
+    </div>
+    <div class="stat">
+        <div class="label">% of Average</div>
+        <div class="value" id="pctAvg">--<span class="unit">%</span></div>
+    </div>
+</div>
+
+<div class="chart-wrap">
+    <div class="chart-title">Hourly Generation & Irradiation</div>
+    <canvas id="chart"></canvas>
+    <div class="legend">
+        <span><i style="background:#22c55e"></i> Today PV</span>
+        <span><i style="background:#22c55e;border-top:2px dashed #22c55e;height:0"></i> Avg PV (30d)</span>
+        <span><i style="background:#f59e0b"></i> Today Irrad</span>
+        <span><i style="background:#f59e0b;border-top:2px dashed #f59e0b;height:0"></i> Avg Irrad (30d)</span>
+        <span><i style="background:rgba(34,197,94,0.3)"></i> P25-P75</span>
+        <span><i style="background:rgba(150,100,220,0.7);height:1px"></i> Max</span>
+    </div>
+</div>
+
+<div class="chart-wrap">
+    <div class="chart-title">Daily History (last 30 days)</div>
+    <canvas id="historyChart"></canvas>
+</div>
+
+<div class="footer">
+    Auto-refreshes every 5 minutes · Data from FusionSolar Northbound API
+</div>
+
+<script>
+const DATA_URL = './data/processed.json';
+const LABELS = Array.from({length:15},(_,i)=>`${(i+5).toString().padStart(2,'0')}:00`);
+let mainChart=null, histChart=null;
+
+async function loadData(){
+    try{
+        const r=await fetch(`${DATA_URL}?t=${Date.now()}`);
+        if(!r.ok)throw new Error('No data yet');
+        const d=await r.json();
+        render(d);
+    }catch(e){
+        document.getElementById('updated').textContent=`Error: ${e.message}. Run fetch.py and process.py first.`;
+    }
+}
+
+function render(d){
+    document.getElementById('updated').textContent=`Updated: ${d.last_updated||'N/A'} · ${d.date}`;
+    document.getElementById('totalKwh').innerHTML=`${fmt(d.total_kwh)}<span class="unit"> kWh</span>`;
+    const el=document.getElementById('status');
+    el.textContent=d.status?.toUpperCase()||'--';
+    el.className=`status ${d.status||'offline'}`;
+
+    const stats=d.stats_30day||{};
+    document.getElementById('avgKwh').innerHTML=`${fmt(stats.daily_avg||0)}<span class="unit"> kWh</span>`;
+    const pct=stats.daily_avg>0?Math.round(d.total_kwh/(stats.daily_avg)*100):0;
+    document.getElementById('pctAvg').innerHTML=`${pct}<span class="unit">%</span>`;
+
+    drawMainChart(d);
+    drawHistoryChart(d);
+}
+
+function fmt(v){return v>=1000?v.toLocaleString('en',{maximumFractionDigits:1}):v.toFixed(1)}
+
+function drawMainChart(d){
+    const pv=(d.today?.hourly_pv||[]).slice(5,20);
+    const ir=(d.today?.irradiation||[]).slice(5,20);
+    const s=d.stats_30day||{};
+    const avg=(s.hourly_avg||[]).slice(5,20);
+    const avgIr=(s.hourly_irrad_avg||[]).slice(5,20);
+    const p25=(s.hourly_p25||[]).slice(5,20);
+    const p75=(s.hourly_p75||[]).slice(5,20);
+    const mx=(s.hourly_max||[]).slice(5,20);
+    const maxIr=Math.max(...ir,...avgIr,1);
+
+    if(mainChart)mainChart.destroy();
+    mainChart=new Chart(document.getElementById('chart'),{
+        type:'line',
+        data:{labels:LABELS,datasets:[
+            {data:avgIr,borderColor:'#f59e0b',borderWidth:1.5,borderDash:[5,3],fill:false,yAxisID:'y1',pointRadius:0,tension:0.4},
+            {data:ir,borderColor:'#f59e0b',borderWidth:2.5,fill:false,yAxisID:'y1',pointRadius:0,tension:0.4},
+            {data:p25,backgroundColor:'rgba(34,197,94,0.12)',borderColor:'rgba(34,197,94,0.3)',borderWidth:0.5,fill:'+1',pointRadius:0,tension:0.4},
+            {data:p75,backgroundColor:'transparent',borderColor:'rgba(34,197,94,0.3)',borderWidth:0.5,pointRadius:0,tension:0.4},
+            {data:mx,borderColor:'rgba(150,100,220,0.5)',borderWidth:0.8,pointRadius:0,tension:0.4,borderDash:[2,2]},
+            {data:avg,borderColor:'#22c55e',borderWidth:1.5,borderDash:[5,3],fill:false,pointRadius:0,tension:0.4},
+            {data:pv,borderColor:'#22c55e',borderWidth:2.5,fill:false,pointRadius:0,tension:0.4},
+        ]},
+        options:{
+            responsive:true,maintainAspectRatio:false,
+            plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false}},
+            scales:{
+                x:{ticks:{color:'#6b7280',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}},
+                y:{beginAtZero:true,ticks:{color:'#6b7280'},grid:{color:'rgba(255,255,255,0.04)'}},
+                y1:{position:'right',beginAtZero:true,max:maxIr/0.65,display:false}
+            }
+        }
+    });
+}
+
+function drawHistoryChart(d){
+    const hist=d.history||{};
+    const dates=Object.keys(hist).sort().slice(-30);
+    const vals=dates.map(dt=>hist[dt]?.total_kwh||0);
+    const labels=dates.map(dt=>dt.slice(5)); // MM-DD
+
+    if(histChart)histChart.destroy();
+    histChart=new Chart(document.getElementById('historyChart'),{
+        type:'bar',
+        data:{labels,datasets:[{data:vals,backgroundColor:'#22c55e',borderRadius:3}]},
+        options:{
+            responsive:true,maintainAspectRatio:false,
+            plugins:{legend:{display:false}},
+            scales:{
+                x:{ticks:{color:'#6b7280',font:{size:9}},grid:{display:false}},
+                y:{beginAtZero:true,ticks:{color:'#6b7280'},grid:{color:'rgba(255,255,255,0.04)'}}
+            }
+        }
+    });
+}
+
+// Load and auto-refresh
+loadData();
+setInterval(loadData, 300000);
+</script>
+</body>
+</html>
