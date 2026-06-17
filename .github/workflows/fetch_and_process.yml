@@ -1,0 +1,39 @@
+name: Fetch and Process
+
+on:
+  schedule:
+    - cron: '5,35 3-19 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with: { python-version: '3.11' }
+      - run: pip install requests pandas openpyxl
+      - name: Fetch data from API
+        env:
+          FUSIONSOLAR_API_USER: ${{ secrets.FUSIONSOLAR_API_USER }}
+          FUSIONSOLAR_API_PASS: ${{ secrets.FUSIONSOLAR_API_PASS }}
+        run: python fetch.py
+      - name: Process data
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python process.py
+      - name: Commit and push
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add sites/*/data/*.json data/raw/*.json
+          git diff --quiet && git diff --staged --quiet && exit 0
+          git commit -m "Update data - $(date +'%Y-%m-%d %H:%M UTC')"
+          for i in 1 2 3; do
+            git pull --no-rebase -X ours && git push && break
+            sleep 5
+          done
