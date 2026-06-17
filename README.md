@@ -1,9 +1,7 @@
+Hi Vince, here is the readme for the example site.
+
 # Single-Site PV Dashboard — Learning & Test Repo
-
-A complete, self-contained solar monitoring dashboard for **one site** (Addo Spar).
 Includes both the **API fetcher** and the **browser scraper** so you can test both approaches.
-
-## What's in this repo
 
 ```
 ├── fetch.py                          # API approach (HTTP requests, fast, no browser)
@@ -115,14 +113,14 @@ https://YOUR-USERNAME.github.io/REPO-NAME/sites/addo-spar/
 
 Edit the top of fetch.py, scrape.py, and process.py:
 
-```python
+```python - Slug is still used here, can change it to something else, keeping slug for now, (just used for HTML names as easy to read)
 SITE_NAME    = "Your Plant Name"      # Exact name in FusionSolar
-SITE_SLUG    = "your-plant"           # Folder name (lowercase, hyphens)
+SITE_SLUG    = "your-plant"           # Folder name (lowercase, hyphens) 
 STATION_CODE = "NE=12345678"          # From DISCOVER=1 (API only)
 LAT, LON     = -33.00, 25.00          # GPS coordinates
 ```
 
-Rename the sites/ folder to match your slug.
+Rename the sites/ folder to match your site name.
 
 ## Discovering your station code (API only)
 ```bash
